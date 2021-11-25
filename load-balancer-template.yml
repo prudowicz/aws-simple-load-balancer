@@ -1,0 +1,168 @@
+Description: hello world example
+Outputs:
+  Instance1PrivateIp:
+    Description: Private IP of backend1 EC2 instance
+    Value: !GetAtt 'backend1.PrivateIp'
+  Instance2PrivateIp:
+    Description: Private IP of backend2 EC2 instance
+    Value: !GetAtt 'backend2.PrivateIp'
+  LoadBalancerUrl:
+    Description: Loadbalancer endpoint
+    Value: !Join
+      - ''
+      - - http://
+        - !GetAtt 'ApplicationLoadBalancer.DNSName'
+        - ':'
+        - 80
+
+
+Parameters:
+  KeyPair:
+    ConstraintDescription: must be the name of an existing EC2 KeyPair
+    Description: Name of EC2 KeyPair to SSH
+    Type: AWS::EC2::KeyPair::KeyName
+  VPCId:
+    Description: ID of the VPC network
+    Type: AWS::EC2::VPC::Id
+  SubnetId1:
+    Type: AWS::EC2::Subnet::Id
+    Description: SubnetId for backend1 server
+      Virtual Private Cloud (VPC)
+    ConstraintDescription: must be an existing subnet in the selected Virtual Private Cloud.
+  SubnetId2:
+    Type: AWS::EC2::Subnet::Id
+    Description: SubnetId for backend2 server
+      Virtual Private Cloud (VPC)
+    ConstraintDescription: must be an existing subnet in the selected Virtual PrivateCloud and different than SubnetId1
+
+    
+Resources:
+  ELBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'HTTP port 80 access from outside'
+      VpcId:
+        Ref: VPCId
+      SecurityGroupIngress:
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            CidrIp: 0.0.0.0/0
+
+  BackendSecurityGroup:
+    Properties:
+      GroupDescription: Allow SSH and TCP/80 access
+      GroupName: 
+        Ref: 'AWS::StackName'
+      SecurityGroupIngress:
+        # - CidrIp: '0.0.0.0/0'
+        #   FromPort: '22'
+        #   IpProtocol: tcp
+        #   ToPort: '22'
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId:
+            Ref: ELBSecurityGroup
+      VpcId: !Ref 'VPCId'
+    Type: AWS::EC2::SecurityGroup
+
+  backend1:
+    Properties:
+      ImageId: ami-0bd99ef9eccfee250
+      InstanceType: t2.micro
+      KeyName: !Ref 'KeyPair'
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+          - !Ref BackendSecurityGroup
+          SubnetId:
+            Ref: SubnetId1
+      UserData: !Base64
+        Fn::Join:
+          - "\n"
+          - - '#!/bin/bash'
+            - sudo yum update -y
+            - sudo yum install -y httpd
+            - sudo systemctl start httpd
+            - sudo systemctl enable httpd
+            - sudo sh -c "hostname > /var/www/html/index.html"
+    Type: AWS::EC2::Instance
+
+  backend2:
+    Properties:
+      ImageId: ami-0bd99ef9eccfee250
+      InstanceType: t2.micro
+      KeyName: !Ref 'KeyPair'
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: 'true'
+          DeviceIndex: '0'
+          GroupSet:
+          - !Ref BackendSecurityGroup
+          SubnetId:
+            Ref: SubnetId2
+      UserData: !Base64
+        Fn::Join:
+          - "\n"
+          - - '#!/bin/bash'
+            - sudo yum update -y
+            - sudo yum install -y httpd
+            - sudo systemctl start httpd
+            - sudo systemctl enable httpd
+            - sudo sh -c "hostname > /var/www/html/index.html"
+    Type: AWS::EC2::Instance
+
+  EC2TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 30
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 15
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Name: 
+        'Fn::Join': [ '-', [ 'target-group', !Ref 'AWS::StackName' ] ]
+      Port: 80
+      Protocol: HTTP
+      TargetGroupAttributes:
+      - Key: deregistration_delay.timeout_seconds
+        Value: '20'
+      Targets:
+        - Id:
+            Ref: backend1
+        - Id:
+            Ref: backend2
+          Port: 80
+      UnhealthyThresholdCount: 3
+      VpcId:
+        !Ref 'VPCId'
+      Tags:
+      - Key: Name
+        Value:
+          'Fn::Join': [ '-', [ 'target-group', !Ref 'AWS::StackName' ] ]
+      - Key: Port
+        Value: 80
+
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn:
+              Ref: EC2TargetGroup
+      LoadBalancerArn:
+          Ref: ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing # or internal
+      Subnets:
+      - Ref: SubnetId1
+      - Ref: SubnetId2
+      SecurityGroups:
+      - Ref: ELBSecurityGroup
