@@ -31,7 +31,7 @@ Parameters:
     ConstraintDescription: must be an existing subnet in the selected Virtual Private Cloud.
   SubnetId2:
     Type: AWS::EC2::Subnet::Id
-    Description: SubnetId for backend2 server
+    Description: SubnetId for backend2 server, needs to be different than SubnetId1
       Virtual Private Cloud (VPC)
     ConstraintDescription: must be an existing subnet in the selected Virtual PrivateCloud and different than SubnetId1
 
