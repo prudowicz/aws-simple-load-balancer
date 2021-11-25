@@ -1,4 +1,4 @@
-Description: hello world example
+Description: Simple load balancer with 2 backends and default VPC network
 Outputs:
   Instance1PrivateIp:
     Description: Private IP of backend1 EC2 instance
